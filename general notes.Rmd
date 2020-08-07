@@ -1,0 +1,279 @@
+---
+title: "Election integrity Twitter notes"
+output: html_notebook
+---
+
+##Thoughts
+
+Thinking about the advice to select a sample frame in advance, rather than rely on the live-stream. Who to include?
+
+Government and candidates:
+
+Pres. Trump and VP Pence
+Biden and VP nom
+All governors
+All MCs
+DNC
+RNC
+State party orgs
+PresSec
+
+Opinion leaders on the right:
+-Fox News hosts
+-Drudge Report
+-Brietbart
+-Daily Caller
+-Don Jr, Eric, Ivanka
+
+Opinion leaders on the left:
+
+
+
+The other way to do this would be as outlined in Dubois and Gaffney (2014) and Guo et al (2020):
+1) Identify a Twitter community using hashtags
+2) Use network measures to identify important nodes
+3) Collect the timelines from those users
+4) Collect their friend data and estimate ideology
+
+Bail et al (2018) collect the timelines for all presidential candidates and MCs, plus all the twitter accounts followed by those officials (keeping only those followed by 15 or more officials). They eliminate for-profit companies, USG agencies, and foreign leaders. They then follow Barbera by coding the ideology for all of these opinion leaders
+
+If going this approach, likely should not trim accounts followed by 15 or fewer governors--accounts governors follow may be important state opinion leaders.
+
+
+Looking up users
+
+```{r}
+library(rtweet)
+library(tidyverse)
+###Governors
+govs <- read.csv("governor_handles.csv")
+govs_data <- lookup_users(as.character(govs$handle))
+
+#Sys.sleep(60*15)
+#govs_friends3 <- #if(govs_data$friends_count <= 5000){
+#  get_friends(as.character(govs$handle[26:40]), retryonratelimit = TRUE)
+#} else {}
+
+gov_friends <- matrix(nrow = 1, ncol = 2, NA)
+colnames(gov_friends) <- c("user", "user_id")
+
+i <- 1
+for (i in 1:nrow(govs)){
+  gov_friends_temp <- get_friends(as.character(govs$handle[i]))
+  gov_friends <- rbind(gov_friends, gov_friends_temp)
+  print(paste("User", i, "of", nrow(govs), "complete!"))
+
+  Sys.sleep(61)
+}
+
+write.csv(gov_friends, "gov_friends.csv")
+
+
+###Members of Congress
+congress <- read.csv("congress_handles.csv")
+congress_data <- lookup_users(as.character(congress$CSPAN))
+
+congress_friends <- matrix(nrow = 1, ncol = 2, NA)
+colnames(congress_friends) <- c("user", "user_id")
+
+i <- 1
+for (i in 419:nrow(congress)){
+  congress_friends_temp <- get_friends(as.character(congress$CSPAN[i]))
+  congress_friends <- rbind(congress_friends, congress_friends_temp)
+  print(paste("User", i, "of", nrow(congress), "complete!"))
+
+  Sys.sleep(61)
+}
+
+write.csv(congress_friends, "congress_friends.csv")
+
+
+###Party leaders and other miscellaneous
+
+leaders <- read.csv("leader_party_handles.csv")
+leaders_data <- lookup_users(as.character(leaders$handle))
+
+#Sys.sleep(60*15)
+#govs_friends3 <- #if(govs_data$friends_count <= 5000){
+#  get_friends(as.character(govs$handle[26:40]), retryonratelimit = TRUE)
+#} else {}
+
+leader_friends <- matrix(nrow = 1, ncol = 2, NA)
+colnames(leader_friends) <- c("user", "user_id")
+
+i <- 1
+for (i in 1:nrow(leaders)){
+  leader_friends_temp <- get_friends(as.character(leaders$handle[i]))
+  leader_friends <- rbind(leader_friends, leader_friends_temp)
+  print(paste("User", i, "of", nrow(leaders), "complete!"))
+
+  Sys.sleep(61)
+}
+
+write.csv(leader_friends, "leader_friends.csv")
+
+```
+
+
+Next step is combined usernames or ids for all electeds and their friends
+
+```{r}
+gov_friends <- read.csv("gov_friends.csv")
+congress_friends <- read.csv("congress_friends.csv")
+leader_friends <- read.csv("leader_friends.csv")
+
+all_friends <- bind_rows(gov_friends, congress_friends, leader_friends)
+#all_friends_distinct <- all_friends %>% select(user, user_id) %>% distinct(user_id) #Do this after subsetting for number of elite followers
+
+write.csv(all_friends, "all_friends.csv") #Pick up here by figuring out right way to combine these friends with the political elites. Ultimately we want to exclude friends who are followed by less than three electeds, but include all electeds.
+
+gov_handles <- read.csv("governor_handles.csv")
+
+governors <- unique(gov_friends$user)
+gov_info <- lookup_users(as.character(governors))
+gov_ids <- gov_info %>% select(user_id) %>% as.vector()
+gov_friend_ids <- gov_friends %>% select(user_id)
+
+elite.ids <- rbind(gov_ids, gov_friend_ids)
+write.csv(elite.ids, "elite_user_ids.csv")
+
+
+congress_friends_distinct <- congress_friends %>% select(user_id) %>% distinct()
+congress_handles <- read.csv("congress_handles.csv")
+
+congress_info <- lookup_users(as.character(congress_handles$CSPAN))
+congress_ids <- congress_info %>% select(user_id) %>% as.vector()
+congress_friend_ids <- congress_friends_distinct %>% select(user_id)
+
+elite.ids <- rbind(congress_ids, congress_friend_ids)
+write.csv(elite.ids, "elite_user_ids2.csv")
+
+leader_friends_distinct <- leader_friends %>% select(user_id) %>% distinct()
+leader_handles <- read.csv("leader_party_handles.csv")
+
+leader_info <- lookup_users(as.character(leader_handles$handle))
+leader_ids <- leader_info %>% select(user_id) %>% as.vector()
+leader_friends_ids <- leader_friends_distinct %>% select(user_id)
+
+elite.ids <- rbind(leader_ids, leader_friends_ids)
+write.csv(elite.ids, "elite_user_ids3.csv")
+```
+
+```{r}
+elites1 <- read.csv("elite_user_ids.csv")
+elites2 <- read.csv("elite_user_ids2.csv")
+elites3 <- read.csv("elite_user_ids3.csv")
+
+elites <- bind_rows(elites1, elites2, elites3)
+elites_distinct <- elites %>% select(user_id) %>% distinct()
+
+write.csv(elites_distinct, "elites_user_ids_all.csv")
+```
+
+
+
+As a function, this could be written as:
+
+```{r}
+get_friends_custom <- function(user_data){
+  if(is.null(user_data$handle) = TRUE){
+    user_data <- user_data %>% mutate(handle == user_id)
+  }
+  user_friends_temp <- get_friends(as.character(user_data$handle[i]))
+  user_friends <- rbind(user_friends, user_friends_temp)
+  print(paste("User", i, "of", nrow(govs), "complete!"))
+
+  Sys.sleep(61)
+}
+```
+
+
+Playing around with network tools. Problem in data collection--at least first gov is collected 3 times.
+
+```{r}
+library(sna)
+library(igraph)
+library(network)
+gov.friends <- read.csv("gov_friends.csv")
+gov.friends <- gov.friends %>% filter(is.na(user) == FALSE)
+gov.friends <- gov.friends %>% select(user, user_id)
+gov.friends <- gov.friends %>% mutate(n = 1)
+gov.friends <- gov.friends %>% mutate(user_id = as.character(user_id))
+
+gov.friends <- gov.friends %>% add_count(user_id, name = "total.followers")
+gov.friends2 <- gov.friends %>% filter(total.followers >= 5) #These accounts are followed by 5 or more govs
+
+gov.friends.edgelist <- gov.friends2 %>% select(1:3) %>% as.edgelist.sna(gov.friends2)
+
+###Igraph version, can't figure out how to inspect the resulting matrix###
+test <- graph.data.frame(gov.friends.edgelist)
+test.adj <- as.matrix(as_adjacency_matrix(test))
+
+write.csv(test.adj, "gov_friends_adj.csv")
+
+###Correspondence analysis
+library(FactoMineR)
+govs.adj <- read.csv("gov_friends_adj.csv")
+govs.adj2 <- govs.adj %>% dplyr::select(-X)
+test <- CA(govs.adj2)
+print(test)
+
+library(factoextra)
+eig.val <- get_eigenvalue(test)
+eig.val
+
+
+###Other ways of getting adjacency
+
+g <-gov.friends2 %>% select(1:2) %>%  graph.data.frame() #An igraph object
+
+g.adj <- as_adjacency_matrix(g, sparse = FALSE)
+
+###Network package version
+n.adj <- as.network.matrix(gov.friends.edgelist, matrix.type = "adjacency")
+```
+
+##Barbera method
+```{r}
+library(tweetscores)
+library(rtweet)
+
+api_key <- "MitZ8CpsxQeeASr14J2mf5kE1"
+api_secret_key <- "cXXoOIw3SEx2EV0D5SAZbdDff9jgIhOb8mS4W67nMzcS9F9zVZ"
+access_token <- "1264943028478849029-7K7p01qyfBVY1JwdltQ2HQ50mXib2D"
+access_token_secret <- "6gWPVfHFqkrHWxndGo0thNhtMnOxQngS8IwudxJjnqbG5"
+
+token <- create_token(
+  app = "ideologystudy",
+  consumer_key = api_key,
+  consumer_secret = api_secret_key,
+  access_token = access_token,
+  access_secret = access_token_secret)
+
+my_oauth <- list(consumer_key = api_key,
+                 consumer_secret = api_secret_key,
+                 access_token = access_token,
+                 access_token_secret = access_token_secret)
+
+##Remove duplicates
+gov.friends.list <- gov.friends2 %>% select(user_id)
+gov.friends.list <- unique(gov.friends.list)
+gov.friends.info <- lookup_users(gov.friends.list$user_id)
+usernames <- gov.friends.info %>% select(user_id, screen_name)
+
+gov.friends.friends <- get_friends(users = as.numeric(gov.friends.info$user_id), retryonratelimit = TRUE) #Then get the username from gov.friends.info
+
+gov.friends.friends <- gov.friends.friends %>% left_join(usernames, by = "user_id")
+
+friends.unique <- unique(gov.friends.friends$screen_name)
+
+for(i in 1:nrow(govs)){
+  user.t <- friends.unique$value[i]
+  friends.list <- gov.friends.friends %>% filter(user == user.t) %>% select(user_id)
+  result <- estimateIdeology2(user = governor, friends = as.numeric(friends.list$user_id))
+}
+
+temp <- estimateIdeology2(user = govs.test$value[1], friends = gov.friends2)
+
+```
+

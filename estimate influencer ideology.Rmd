@@ -1,0 +1,133 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+Note that all_friends does not include the electeds themselves (except where they are followed by other electeds)
+
+```{r setup}
+library(tidyverse)
+library(rtweet)
+library(tweetscores)
+
+all_friends <- read.csv("all_friends_info.csv")
+all_friends <- all_friends %>% filter(is.na(screen_name) == FALSE)
+
+all_friends <- all_friends %>% mutate(agency.account = ifelse(is.na(agency.account)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(corporate.account = ifelse(is.na(corporate.account)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(university = ifelse(is.na(university)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(inactive = ifelse(is.na(inactive)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(hospital = ifelse(is.na(hospital)==TRUE, 0, 1))
+
+all_friends_sub <- all_friends %>% filter(agency.account == 0 & corporate.account == 0 &
+                                            university == 0 & inactive == 0 & hospital == 0)
+
+#all_friends <- read.csv("all_friends.csv") 
+#all_friends <- all_friends %>% select(user, user_id)
+#all_friends <- all_friends %>% filter(is.na(user) == FALSE)
+#all_friends <- all_friends %>% mutate(n = 1)
+#all_friends <- all_friends %>% mutate(user_id = as.character(user_id))
+
+#all_friends <- all_friends %>% add_count(user_id, name = "total.followers")
+#all_friends2 <- all_friends %>% filter(total.followers >= 5) #These accounts are followed by 3 or more electeds
+#all_friends2_distinct <- all_friends2 %>% distinct(user_id, .keep_all = TRUE)
+
+
+#elites <- as.numeric(unique(all_friends2_distinct$user_id))
+#all_friends_distinct_info <- lookup_users(elites)
+#all_friends_distinct_info2 <- all_friends_distinct_info %>% select(user_id, screen_name, description)
+
+#all_friends2_distinct2 <- left_join(all_friends2_distinct, all_friends_distinct_info2, by = "user_id")
+
+
+
+#rm(all_friends)
+```
+
+Coding rules for government agency accounts: Keyword search (department, dept, agency, nws, dot, emergency, command, gov, commission, park, division, NASA, federal, embassy, consulate) + manual review. Excludes officials' named accounts (e.g. SecPompeo), state election authorities, and police.
+
+Next step is to identify corporate accounts (including sports accounts)
+
+
+
+##Get unique accounts followed by electeds
+
+```{r}
+influencer.list <- all_friends_sub %>% select(user_id, screen_name)
+rm(all_friends)
+rm(all_friends_sub)
+```
+
+##Go through these 'influential accounts' and get their friends
+
+```{r}
+influencer.friends <- data.frame(matrix(nrow = 1, ncol = 3, NA))
+colnames(influencer.friends) <- c("influencer.name", "user_id", "ideology.estimate")
+container <- data.frame(matrix(nrow = 1, ncol = 3, NA))
+colnames(container) <- c("influencer.name", "user_id", "ideology.estimate")
+
+outer.container <- split(influencer.list, (as.numeric(rownames(influencer.list))-1) %/% 500)
+
+for(j in 3:length(outer.container)){ 
+  influencer.list.sub <- outer.container[[j]]
+
+
+i <- 1
+for (i in 1:nrow(influencer.list.sub)){
+  tryCatch({
+  influencer.friends_temp <- data.frame(matrix(nrow = 1, ncol = 2, NA))
+  colnames(influencer.friends_temp) <- c("influencer.name", "user_id")
+  influencer.friends_temp <- get_friends(users = as.numeric(influencer.list.sub$user_id[i]))
+  print("Friends collected. Pausing for 62 seconds.")
+  Sys.sleep(62)
+
+    user_id <- as.numeric(influencer.list.sub$user_id[i])
+  influencer.name <- as.character(influencer.list.sub$screen_name[i])
+  ideology.estimate <- estimateIdeology2(user = influencer.name, friends =  as.numeric(influencer.friends_temp$user_id))
+  container[1,1] <- influencer.name
+      container[1,2] <- user_id
+  container[1,3] <- ideology.estimate
+
+  influencer.friends <- bind_rows(influencer.friends, container)
+
+  print(paste("User", i, "of", nrow(influencer.list.sub), "complete!"))
+
+  },  error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+colnames(influencer.friends) <- c("influencer.name", "user_id", "ideology.estimate")
+
+filepath <- paste0("influencer-ideology-", j, ".csv")
+write.csv(influencer.friends, file = filepath)
+readline(prompt="Press [enter] to continue")
+
+}
+```
+
+
+
+
+##Estimate ideology for influencers based on friends
+###Needs work, user_id is not correct. Need to disentangle user (influencer) from user_id (friend)
+
+```{r}
+influencer.info <- lookup_users(users=as.numeric(influencer.friends$user))
+influencer.info <- influencer.info %>% mutate(user = as.numeric(user_id))
+influencer.friends2 <- influencer.friends %>% left_join(influencer.info, by = "user")
+influencer.friends2 <- influencer.friends2 %>% rename(user_id.influencer = user_id.y)
+influencer.friends2 <- influencer.friends2 %>% rename(user_id.friend = user_id.x)
+
+influencer.list <- influencer.list %>% mutate(ideology.estimate = NA)
+
+i <- 1
+for(i in 1:nrow(influencer.list)){
+  tryCatch({
+  influencer.id <- as.numeric(influencer.list$user_id[i])
+  influencer.friends.subset <- influencer.friends2 %>% filter(as.numeric(user_id.influencer) == influencer.id)
+  influencer.name <- unique(influencer.friends.subset$screen_name)
+  friends.list <- influencer.friends.subset %>% select(user_id.friend)
+  result <- estimateIdeology2(user = influencer.name, friends = as.numeric(friends.list$user_id.friend))
+  influencer.list$ideology.estimate[i] <- result}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+```
+
+Next step is collect the MoC and other elites list
