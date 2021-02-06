@@ -60,16 +60,19 @@ rm(all_friends_sub)
 
 ##Go through these 'influential accounts' and get their friends
 
-```{r}
-influencer.friends <- data.frame(matrix(nrow = 1, ncol = 3, NA))
-colnames(influencer.friends) <- c("influencer.name", "user_id", "ideology.estimate")
+```{r message FALSE}
+
 container <- data.frame(matrix(nrow = 1, ncol = 3, NA))
-colnames(container) <- c("influencer.name", "user_id", "ideology.estimate")
 
 outer.container <- split(influencer.list, (as.numeric(rownames(influencer.list))-1) %/% 500)
 
-for(j in 3:length(outer.container)){ 
+for(j in 32:length(outer.container)){ 
   influencer.list.sub <- outer.container[[j]]
+  
+  influencer.friends <- data.frame(matrix(nrow = 1, ncol = 3, NA))
+  colnames(influencer.friends) <- c("influencer.name", "user_id", "ideology.estimate")
+  container <- data.frame(matrix(nrow = 1, ncol = 3, NA))
+  colnames(container) <- c("influencer.name", "user_id", "ideology.estimate")
 
 
 i <- 1

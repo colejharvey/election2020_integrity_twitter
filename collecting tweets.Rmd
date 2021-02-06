@@ -1,0 +1,108 @@
+---
+title: "Collecting tweets"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(rtweet)
+library(lubridate)
+```
+
+```{r}
+govs <- read.csv("governor_handles.csv")
+congress <- read.csv("congress_handles.csv")
+leaders <- read.csv("leader_party_handles.csv")
+
+govs <- govs %>% mutate(position = "gov")
+congress <- congress %>% rename(position = Position)
+leaders <- leaders %>% mutate(position = "leader")
+
+
+gov_name <- govs %>% select(handle, position)
+gov_name <- gov_name %>% rename(user.name = handle)
+
+cong_names <- congress %>% select(CSPAN, position)
+cong_names <- cong_names %>% rename(user.name = CSPAN)
+
+lead_names <- leaders %>% select(handle, position)
+lead_names <- lead_names %>% rename(user.name = handle)
+
+
+user_names <- bind_rows(gov_name, cong_names, lead_names)
+```
+
+##Replacing any outdated entries
+
+(Skip for now)
+```{r}
+as.character(user_names[231, 1]) <- "RepJacobs" #Replaces RepChrisCollins
+
+as.character(user_names[285, 1]) <- NA 
+##Replace "Rep_Hunter", not filled
+```
+
+
+##Getting and storing timelines
+
+This includes a selection modifier here to only include relevant columns (reduce data size). Right now it defaults to most recent 100 tweets, this can be changed.
+
+Note that 'check = FALSE' must be included in get_timeline, or it will time out after it hits the rate_limit rate limit
+
+Function for switching list columns to character vectors
+
+```{r}
+tibble_with_lists_to_csv <- function(tibble_object, file_path_name) {
+    set_lists_to_chars <- function(x) { 
+        if(class(x) == 'list') { y <- paste(unlist(x[1]), sep='', collapse=', ') } else { y <- x  } 
+        return(y) }
+    new_frame <- data.frame(lapply(tibble_object, set_lists_to_chars), stringsAsFactors = F)
+    write.csv(new_frame, file=file_path_name)
+}
+```
+
+
+
+```{r}
+timeline.data <- get_timeline(as.character(user_names[1,1]), n = 1000) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified)
+
+timeline.data <- timeline.data %>% filter(created_at >= "2021-1-12 12:00:00")  #Change cutoff date here
+
+#Next add a for loop here, with bind_rows to append to timeline.data
+
+for(i in 2:nrow(user_names)){
+   tryCatch({
+  temp.data <- get_timeline(as.character(user_names[i,1]), n = 1000, check = F) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified)
+  temp.data <- temp.data %>% filter(created_at >= "2021-1-12 12:00:00") #Change cutoff date here
+
+  timeline.data <- bind_rows(timeline.data, temp.data)
+  
+  #rl <- rate_limit(get_timeline)
+  print(paste("User", i, "complete."))}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+timeline.data <- as_tibble(timeline.data)
+
+tibble_with_lists_to_csv(timeline.data, "electeds tweets jan-23-21.csv")
+```
+
+NOTE: TRUMP TWITTER DEACTIVATED FOLLOWING JANUARY 6 2021. WILL NEED TO COLLECT TRUMP TWEETS FROM 12-20 TO 
+1-6 FROM ANOTHER SOURCE
+
+(Always confirm that the tibble_with_lists function worked correctly before exiting)
+
+Next step above will be to build in a structure that pauses when i is a multiple of 900, checks the rate limit, and waits for the remaining time in the limit.
+
+```{r}
+tweets.full <- read.csv("electeds tweets 10-6-20.csv")
+
+tweets.sub <- tweets.full %>% slice_head(n = 10)
+tweets.sub <- tweets.sub %>% mutate(created_date = as_date(created_at))
+
+tweets.post.feb <- tweets.full %>% filter(as_date(created_at) >= "2020-02-01")
+write.csv(tweets.post.feb, "covid-era-tweets-all.csv")
+
+
+tweets.post.august <- tweets.full %>% filter(as_date(created_at) >= "2020-08-01")
+write.csv(tweets.post.feb, "august-sept-2020-elected-tweets-all.csv")
+```
+

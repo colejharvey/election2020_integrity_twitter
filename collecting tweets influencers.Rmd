@@ -1,0 +1,237 @@
+---
+title: "Collecting tweets"
+output: html_notebook
+---
+
+```{r setup}
+library(tidyverse)
+library(rtweet)
+library(tweetscores)
+library(data.table)
+library(lubridate)
+
+all_friends <- read.csv("all_friends_info.csv")
+all_friends <- all_friends %>% filter(is.na(screen_name) == FALSE)
+
+all_friends <- all_friends %>% mutate(agency.account = ifelse(is.na(agency.account)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(corporate.account = ifelse(is.na(corporate.account)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(university = ifelse(is.na(university)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(inactive = ifelse(is.na(inactive)==TRUE, 0, 1))
+all_friends <- all_friends %>% mutate(hospital = ifelse(is.na(hospital)==TRUE, 0, 1))
+
+all_friends_sub <- all_friends %>% filter(agency.account == 0 & corporate.account == 0 &
+                                            university == 0 & inactive == 0 & hospital == 0)
+
+all_friends_sub2 <- all_friends_sub %>% filter(total.followers >= 10)
+
+#all_friends <- read.csv("all_friends.csv") 
+#all_friends <- all_friends %>% select(user, user_id)
+#all_friends <- all_friends %>% filter(is.na(user) == FALSE)
+#all_friends <- all_friends %>% mutate(n = 1)
+#all_friends <- all_friends %>% mutate(user_id = as.character(user_id))
+
+#all_friends <- all_friends %>% add_count(user_id, name = "total.followers")
+#all_friends2 <- all_friends %>% filter(total.followers >= 5) #These accounts are followed by 3 or more electeds
+#all_friends2_distinct <- all_friends2 %>% distinct(user_id, .keep_all = TRUE)
+
+
+#elites <- as.numeric(unique(all_friends2_distinct$user_id))
+#all_friends_distinct_info <- lookup_users(elites)
+#all_friends_distinct_info2 <- all_friends_distinct_info %>% select(user_id, screen_name, description)
+
+#all_friends2_distinct2 <- left_join(all_friends2_distinct, all_friends_distinct_info2, by = "user_id")
+
+
+
+#rm(all_friends)
+```
+
+Coding rules for government agency accounts: Keyword search (department, dept, agency, nws, dot, emergency, command, gov, commission, park, division, NASA, federal, embassy, consulate) + manual review. Excludes officials' named accounts (e.g. SecPompeo), state election authorities, and police.
+
+Next step is to identify corporate accounts (including sports accounts)
+
+
+
+##Get unique accounts followed by electeds
+
+```{r}
+influencer.list <- all_friends_sub2 %>% select(user_id, screen_name)
+rm(all_friends)
+rm(all_friends_sub)
+```
+
+
+Getting and storing timelines
+
+This includes a selection modifier here to only include relevant columns (reduce data size). Right now it defaults to most recent 100 tweets, this can be changed.
+
+Note that 'check = FALSE' must be included in get_timeline, or it will time out after it hits the rate_limit rate limit
+
+Function for switching list columns to character vectors
+
+```{r}
+tibble_with_lists_to_csv <- function(tibble_object, file_path_name) {
+    set_lists_to_chars <- function(x) { 
+        if(class(x) == 'list') { y <- paste(unlist(x[1]), sep='', collapse=', ') } else { y <- x  } 
+        return(y) }
+    new_frame <- data.frame(lapply(tibble_object, set_lists_to_chars), stringsAsFactors = F)
+    write.csv(new_frame, file=file_path_name)
+}
+```
+
+
+
+```{r}
+tw_token <-
+rtweet::create_token(
+app = "Study ideology",
+consumer_key = "MitZ8CpsxQeeASr14J2mf5kE1",
+consumer_secret = "cXXoOIw3SEx2EV0D5SAZbdDff9jgIhOb8mS4W67nMzcS9F9zVZ",
+access_token = "1264943028478849029-7K7p01qyfBVY1JwdltQ2HQ50mXib2D",
+access_secret = "6gWPVfHFqkrHWxndGo0thNhtMnOxQngS8IwudxJjnqbG5"
+)
+
+
+```
+
+No looping, not noticeably faster 
+
+#```{r}
+#tl.data.1 <- get_timeline(as.character(influencer.list[1:50,2]), n = 3200, token = #tw_token) %>% filter(as.Date(created_at)) >= "2020-08-01" %>% select(user_id, status_id, #created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, #quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, #country_code, location, followers_count, verified) %>% data.table()
+#```
+
+
+
+List style
+```{r}
+tl.list <- vector("list", length = 1000)
+
+timeline.data <- get_timeline(as.character(influencer.list[1,2]), n = 3200, token = tw_token) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified) %>% data.table()
+
+timeline.data <- timeline.data %>% filter(as.Date(created_at) >= "2020-08-01")
+
+tl.list[[1]] <- timeline.data
+rm(timeline.data)
+
+###Loop
+system.time(
+for(i in 651:1000){
+   tryCatch({
+  temp.data <- get_timeline(as.character(influencer.list[i,2]), n = 3200, check = F, token = tw_token) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified) %>% data.table()
+  temp.data <- temp.data %>% filter(as.Date(created_at) >= "2020-08-01")
+  
+  tl.list[[i]] <- temp.data
+  rm(temp.data)
+  
+  #rl <- rate_limit(get_timeline)
+  print(paste("User", i, "complete."))}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+)
+
+list.data <- rbindlist(tl.list)
+list.data <- as_tibble(list.data)
+
+tibble_with_lists_to_csv(list.data, "influencer tweets 10-12-20_group1.csv")
+
+rm(tl.list)
+system.time(
+for(i in 1001:2000){
+   tryCatch({
+  temp.data <- get_timeline(as.character(influencer.list[i,2]), n = 3200, check = F, token = tw_token) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified) %>% data.table()
+  temp.data <- temp.data %>% filter(as.Date(created_at) >= "2020-08-01")
+  
+  tl.list[[i]] <- temp.data
+  rm(temp.data)
+  
+  #rl <- rate_limit(get_timeline)
+  print(paste("User", i, "complete."))}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+)
+
+list.data <- rbindlist(tl.list)
+
+
+write.csv(list.data, "influencer tweets 10-12-20_group2.csv")
+
+```
+List style automated
+
+```{r}
+outer.container <- split(influencer.list, (as.numeric(rownames(influencer.list))) %/% 900)
+
+for(j in (4:length(outer.container))){
+  temp.list <- outer.container[[j]]
+  tl.list <- vector("list", length = nrow(temp.list))
+
+  for(i in 1:nrow(temp.list)){
+   tryCatch({
+  temp.data <- get_timeline(as.character(temp.list[i,2]), n = 1000, check = F, token = tw_token) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified) %>% data.table()
+  temp.data <- temp.data %>% filter(as.Date(created_at) >= "2021-1-13")
+  
+  tl.list[[i]] <- temp.data
+  rm(temp.data)
+  
+  #rl <- rate_limit(get_timeline)
+  print(paste("User", i, "complete."))}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+list.data <- rbindlist(tl.list)
+list.data <- as_tibble(list.data)
+
+filedate <- Sys.Date()
+filename <- paste0("influencer tweets ", filedate, " group", j, ".csv")
+tibble_with_lists_to_csv(list.data, filename)
+print(paste("Group", j, "complete. Saved."))
+rm(list.data)
+rm(tl.list)
+rm(temp.list)
+remaining.time <- rate_limit("get_timeline") %>% select(reset)
+Sys.sleep(as.duration(remaining.time$reset))
+}
+
+
+
+
+
+```
+
+
+
+```{r}
+timeline.data <- get_timeline(as.character(influencer.list[1,2]), n = 3200, token = tw_token) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified) %>% data.table()
+
+timeline.data <- timeline.data %>% filter(as.Date(created_at) >= "2020-11-19")
+
+#Next add a for loop here, with bind_rows to append to timeline.data
+
+system.time(
+for(i in 2:300){
+   tryCatch({
+  temp.data <- get_timeline(as.character(influencer.list[i,2]), n = 3200, check = F, token = tw_token) %>% select(user_id, status_id, created_at, screen_name, text, is_quote, is_retweet, favorite_count, retweet_count, quote_count, reply_count, hashtags, place_name, place_full_name, place_type, country, country_code, location, followers_count, verified) %>% data.table()
+  temp.data <- temp.data %>% filter(as.Date(created_at) >= "2020-08-01")
+  timeline.data <- bind_rows(timeline.data, temp.data)
+  #rl <- rate_limit(get_timeline)
+  print(paste("User", i, "complete."))}, error=function(e){cat("ERROR :",conditionMessage(e), "\n")})
+}
+)
+timeline.data <- as_tibble(timeline.data)
+
+tibble_with_lists_to_csv(timeline.data, "electeds tweets 10-11-20_group1.csv")
+```
+240 didn't work
+
+Next step above will be to build in a structure that pauses when i is a multiple of 900, checks the rate limit, and waits for the remaining time in the limit.
+
+```{r}
+tweets.full <- read.csv("electeds tweets 10-6-20.csv")
+
+tweets.sub <- tweets.full %>% slice_head(n = 10)
+tweets.sub <- tweets.sub %>% mutate(created_date = as_date(created_at))
+
+tweets.post.feb <- tweets.full %>% filter(as_date(created_at) >= "2020-02-01")
+write.csv(tweets.post.feb, "covid-era-tweets-all.csv")
+
+
+tweets.post.august <- tweets.full %>% filter(as_date(created_at) >= "2020-08-01")
+write.csv(tweets.post.feb, "august-sept-2020-elected-tweets-all.csv")
+```
+
